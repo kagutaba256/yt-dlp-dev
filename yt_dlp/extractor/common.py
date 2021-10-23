@@ -3,6 +3,7 @@ from __future__ import unicode_literals
 
 import base64
 import datetime
+import functools
 import hashlib
 import itertools
 import json
@@ -68,6 +69,7 @@ from ..utils import (
     parse_m3u8_attributes,
     parse_resolution,
     RegexNotFoundError,
+    remove_end,
     sanitize_filename,
     sanitized_Request,
     str_or_none,
@@ -3625,6 +3627,35 @@ class InfoExtractor(object):
         if val is None:
             return [] if default is NO_DEFAULT else default
         return list(val) if casesense else [x.lower() for x in val]
+
+    def _retry(self, error_is_allowed, fatal=True):
+        '''
+        Wrapper to retry a function according to extactor_retries
+        @param error_is_allowed    A function that takes error and returns whether to retry
+        '''
+        max_retries = self.get_param('extractor_retries', 3)
+
+        def outer_wrapper(func):
+            @functools.wraps(func)
+            def inner_wrapper(*args, **kwargs):
+                note = kwargs.get('note')
+                for retry in itertools.count():
+                    if note and retry:
+                        kwargs['note'] = f'{note} (attempt {retry})'
+                    try:
+                        ret = func(*args, **kwargs)
+                    except ExtractorError as e:
+                        if retry < max_retries and error_is_allowed(e):
+                            self.report_warning(f'{remove_end(e.cause or e.msg, ".")}. Retrying...')
+                            continue
+                        if fatal:
+                            raise
+                        self.report_warning(str(e))
+                        return None
+                    break
+                return ret
+            return inner_wrapper
+        return outer_wrapper
 
 
 class SearchInfoExtractor(InfoExtractor):

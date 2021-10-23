@@ -420,19 +420,13 @@ class TikTokUserIE(TikTokBaseIE):
             'device_id': ''.join(random.choice(string.digits) for _ in range(19)),  # Some endpoints don't like randomized device_id, so it isn't directly set in _call_api.
         }
 
-        max_retries = self.get_param('extractor_retries', 3)
+        # The API sometimes return an empty string
+        call_api = self._retry(lambda e: isinstance(e.cause, json.JSONDecodeError) and e.cause.pos == 0)(self._call_api)
+
         for page in itertools.count(1):
-            for retries in itertools.count():
-                try:
-                    post_list = self._call_api('aweme/post', query, username,
-                                               note='Downloading user video list page %d%s' % (page, f' (attempt {retries})' if retries != 0 else ''),
-                                               errnote='Unable to download user video list')
-                except ExtractorError as e:
-                    if isinstance(e.cause, json.JSONDecodeError) and e.cause.pos == 0 and retries != max_retries:
-                        self.report_warning('%s. Retrying...' % str(e.cause or e.msg))
-                        continue
-                    raise
-                break
+            post_list = call_api('aweme/post', query, username,
+                                 note=f'Downloading user video list page {page}',
+                                 errnote='Unable to download user video list')
             for video in post_list.get('aweme_list', []):
                 yield {
                     **self._parse_aweme_video_app(video),

@@ -6,6 +6,7 @@ import base64
 import calendar
 import copy
 import datetime
+import functools
 import hashlib
 import itertools
 import json
@@ -32,7 +33,6 @@ from ..utils import (
     clean_html,
     datetime_from_str,
     dict_get,
-    error_to_compat_str,
     ExtractorError,
     float_or_none,
     format_field,
@@ -49,7 +49,6 @@ from ..utils import (
     parse_iso8601,
     parse_qs,
     qualities,
-    remove_end,
     remove_start,
     smuggle_url,
     str_or_none,
@@ -659,75 +658,57 @@ class YoutubeBaseInfoExtractor(InfoExtractor):
                 if text:
                     return text
 
+    def _handle_incomplete_data(self, func, check_get_keys):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            response = func(*args, **kwargs)
+            self._extract_and_report_alerts(response, only_once=True)
+            # Youtube sometimes sends incomplete data
+            # See: https://github.com/ytdl-org/youtube-dl/issues/28194
+            if check_get_keys and not dict_get(response, check_get_keys):
+                raise ExtractorError('Incomplete data received')
+            return response
+        return wrapper
+
+    def _retry_on_error(self, e):
+        ''' Whether to retry on error e '''
+        if e.cause is None:
+            # YouTube servers may return errors we want to retry on in a 200 OK response
+            # See: https://github.com/yt-dlp/yt-dlp/issues/839
+            if 'unknown error' in e.msg.lower():
+                return True
+            elif e.msg == 'Incomplete data received':
+                return True
+        if not isinstance(e.cause, network_exceptions):
+            return False
+
+        if isinstance(e.cause, compat_HTTPError) and not is_html(e.cause.read(512)):
+            e.cause.seek(0)
+            yt_error = try_get(
+                self._parse_json(e.cause.read().decode(), None, fatal=False),
+                lambda x: x['error']['message'], compat_str)
+            if yt_error:
+                self._report_alerts([('ERROR', yt_error)], fatal=False)
+
+        if isinstance(e.cause, compat_HTTPError) and e.cause.code in (403, 429):
+            return False
+        # Downloading page may result in intermittent 5xx HTTP error
+        # Sometimes a 404 is also recieved. See: https://github.com/ytdl-org/youtube-dl/issues/28289
+        # We also want to catch all other network exceptions since errors in later pages can be troublesome
+        # See https://github.com/yt-dlp/yt-dlp/issues/507#issuecomment-880188210
+        return True
+
     def _extract_response(self, item_id, query, note='Downloading API JSON', headers=None,
                           ytcfg=None, check_get_keys=None, ep='browse', fatal=True, api_hostname=None,
                           default_client='web'):
-        response = None
-        last_error = None
-        count = -1
-        retries = self.get_param('extractor_retries', 3)
-        if check_get_keys is None:
-            check_get_keys = []
-        while count < retries:
-            count += 1
-            if last_error:
-                self.report_warning('%s. Retrying ...' % remove_end(last_error, '.'))
-            try:
-                response = self._call_api(
-                    ep=ep, fatal=True, headers=headers,
-                    video_id=item_id, query=query,
-                    context=self._extract_context(ytcfg, default_client),
-                    api_key=self._extract_api_key(ytcfg, default_client),
-                    api_hostname=api_hostname, default_client=default_client,
-                    note='%s%s' % (note, ' (retry #%d)' % count if count else ''))
-            except ExtractorError as e:
-                if isinstance(e.cause, network_exceptions):
-                    if isinstance(e.cause, compat_HTTPError) and not is_html(e.cause.read(512)):
-                        e.cause.seek(0)
-                        yt_error = try_get(
-                            self._parse_json(e.cause.read().decode(), item_id, fatal=False),
-                            lambda x: x['error']['message'], compat_str)
-                        if yt_error:
-                            self._report_alerts([('ERROR', yt_error)], fatal=False)
-                    # Downloading page may result in intermittent 5xx HTTP error
-                    # Sometimes a 404 is also recieved. See: https://github.com/ytdl-org/youtube-dl/issues/28289
-                    # We also want to catch all other network exceptions since errors in later pages can be troublesome
-                    # See https://github.com/yt-dlp/yt-dlp/issues/507#issuecomment-880188210
-                    if not isinstance(e.cause, compat_HTTPError) or e.cause.code not in (403, 429):
-                        last_error = error_to_compat_str(e.cause or e.msg)
-                        if count < retries:
-                            continue
-                if fatal:
-                    raise
-                else:
-                    self.report_warning(error_to_compat_str(e))
-                    return
-
-            else:
-                try:
-                    self._extract_and_report_alerts(response, only_once=True)
-                except ExtractorError as e:
-                    # YouTube servers may return errors we want to retry on in a 200 OK response
-                    # See: https://github.com/yt-dlp/yt-dlp/issues/839
-                    if 'unknown error' in e.msg.lower():
-                        last_error = e.msg
-                        continue
-                    if fatal:
-                        raise
-                    self.report_warning(error_to_compat_str(e))
-                    return
-                if not check_get_keys or dict_get(response, check_get_keys):
-                    break
-                # Youtube sometimes sends incomplete data
-                # See: https://github.com/ytdl-org/youtube-dl/issues/28194
-                last_error = 'Incomplete data received'
-                if count >= retries:
-                    if fatal:
-                        raise ExtractorError(last_error)
-                    else:
-                        self.report_warning(last_error)
-                        return
-        return response
+        call_api = self._retry(self._retry_on_error, fatal)(
+            self._handle_incomplete_data(self._call_api, check_get_keys))
+        return call_api(
+            ep=ep, fatal=True, headers=headers,
+            video_id=item_id, query=query, note=note,
+            context=self._extract_context(ytcfg, default_client),
+            api_key=self._extract_api_key(ytcfg, default_client),
+            api_hostname=api_hostname, default_client=default_client)
 
     @staticmethod
     def is_music_url(url):
@@ -4080,50 +4061,15 @@ class YoutubeTabIE(YoutubeBaseInfoExtractor):
             note='Downloading API JSON with unavailable videos')
 
     def _extract_webpage(self, url, item_id, fatal=True):
-        retries = self.get_param('extractor_retries', 3)
-        count = -1
-        webpage = data = last_error = None
-        while count < retries:
-            count += 1
-            # Sometimes youtube returns a webpage with incomplete ytInitialData
-            # See: https://github.com/yt-dlp/yt-dlp/issues/116
-            if last_error:
-                self.report_warning('%s. Retrying ...' % last_error)
-            try:
-                webpage = self._download_webpage(
-                    url, item_id,
-                    note='Downloading webpage%s' % (' (retry #%d)' % count if count else '',))
-                data = self.extract_yt_initial_data(item_id, webpage or '', fatal=fatal) or {}
-            except ExtractorError as e:
-                if isinstance(e.cause, network_exceptions):
-                    if not isinstance(e.cause, compat_HTTPError) or e.cause.code not in (403, 429):
-                        last_error = error_to_compat_str(e.cause or e.msg)
-                        if count < retries:
-                            continue
-                if fatal:
-                    raise
-                self.report_warning(error_to_compat_str(e))
-                break
-            else:
-                try:
-                    self._extract_and_report_alerts(data)
-                except ExtractorError as e:
-                    if fatal:
-                        raise
-                    self.report_warning(error_to_compat_str(e))
-                    break
+        extract_yt_initial_data = self._handle_incomplete_data(self.extract_yt_initial_data, ('contents', 'currentVideoEndpoint'))
 
-                if dict_get(data, ('contents', 'currentVideoEndpoint')):
-                    break
+        @self._retry(self._retry_on_error, fatal)
+        def extract_webpage_and_data(url, item_id, *args, **kwargs):
+            webpage = self._download_webpage(url, item_id, *args, **kwargs)
+            data = extract_yt_initial_data(item_id, webpage or '', fatal=fatal)
+            return webpage, data
 
-                last_error = 'Incomplete yt initial data received'
-                if count >= retries:
-                    if fatal:
-                        raise ExtractorError(last_error)
-                    self.report_warning(last_error)
-                    break
-
-        return webpage, data
+        return extract_webpage_and_data(url, item_id, note='Downloading webpage') or (None, None)
 
     def _extract_data(self, url, item_id, ytcfg=None, fatal=True, webpage_fatal=False, default_client='web'):
         data = None
