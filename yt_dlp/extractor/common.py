@@ -3641,12 +3641,12 @@ class InfoExtractor(object):
                 note = kwargs.get('note')
                 for retry in itertools.count():
                     if note and retry:
-                        kwargs['note'] = f'{note} (attempt {retry})'
+                        kwargs['note'] = f'{note} (retry #{retry})'
                     try:
                         ret = func(*args, **kwargs)
                     except ExtractorError as e:
                         if retry < max_retries and error_is_allowed(e):
-                            self.report_warning(f'{remove_end(e.cause or e.msg, ".")}. Retrying...')
+                            self.report_warning(f'{remove_end(str(e.cause or e.msg), ".")}. Retrying...')
                             continue
                         if fatal:
                             raise
