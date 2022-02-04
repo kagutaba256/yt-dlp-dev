@@ -750,6 +750,7 @@ class YoutubeBaseInfoExtractor(InfoExtractor):
 
     def _retry_on_error(self, e):
         ''' Whether to retry on error e '''
+        item_id = None  # FIXME
         if e.cause is None:
             # YouTube servers may return errors we want to retry on in a 200 OK response
             # See: https://github.com/yt-dlp/yt-dlp/issues/839
@@ -779,8 +780,8 @@ class YoutubeBaseInfoExtractor(InfoExtractor):
     def _extract_response(self, item_id, query, note='Downloading API JSON', headers=None,
                           ytcfg=None, check_get_keys=None, ep='browse', fatal=True, api_hostname=None,
                           default_client='web'):
-        call_api = self._retry(self._retry_on_error, fatal)(
-            self._handle_incomplete_data(self._call_api, check_get_keys))
+        call_api = self._retry(self._handle_incomplete_data(self._call_api, check_get_keys),
+                               self._retry_on_error, fatal)
         return call_api(
             ep=ep, fatal=True, headers=headers,
             video_id=item_id, query=query, note=note,
@@ -4171,12 +4172,12 @@ class YoutubeTabBaseInfoExtractor(YoutubeBaseInfoExtractor):
     def _extract_webpage(self, url, item_id, fatal=True):
         extract_yt_initial_data = self._handle_incomplete_data(self.extract_yt_initial_data, ('contents', 'currentVideoEndpoint'))
 
-        @self._retry(self._retry_on_error, fatal)
         def extract_webpage_and_data(url, item_id, *args, **kwargs):
             webpage = self._download_webpage(url, item_id, *args, **kwargs)
             data = extract_yt_initial_data(item_id, webpage or '', fatal=fatal)
             return webpage, data
 
+        extract_webpage_and_data = self._retry(extract_webpage_and_data, self._retry_on_error, fatal)
         return extract_webpage_and_data(url, item_id, note='Downloading webpage') or (None, None)
 
     def _extract_data(self, url, item_id, ytcfg=None, fatal=True, webpage_fatal=False, default_client='web'):

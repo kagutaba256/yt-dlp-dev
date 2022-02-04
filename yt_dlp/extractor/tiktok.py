@@ -560,13 +560,13 @@ class TikTokUserIE(TikTokBaseIE):
         }
 
         # The API sometimes return an empty string
-        call_api = self._retry(lambda e: isinstance(e.cause, json.JSONDecodeError) and e.cause.pos == 0)(self._call_api)
+        call_api = self._retry(self._call_api,
+                               lambda e: isinstance(e.cause, json.JSONDecodeError) and e.cause.pos == 0)
 
         for page in itertools.count(1):
-            for retries in itertools.count():
-                post_list = _call_api('aweme/post', query, username,
-                                      note='Downloading user video list page %d%s' % (page, f' (attempt {retries})' if retries != 0 else ''),
-                                      errnote='Unable to download user video list')
+            post_list = call_api('aweme/post', query, username,
+                                 note=f'Downloading user video list page {page}',
+                                 errnote='Unable to download user video list')
             yield from post_list.get('aweme_list', [])
             if not post_list.get('has_more'):
                 break
@@ -604,19 +604,10 @@ class TikTokBaseListIE(TikTokBaseIE):
             'device_id': ''.join(random.choice(string.digits) for i in range(19))
         }
 
-        max_retries = self.get_param('extractor_retries', 3)
         for page in itertools.count(1):
-            for retries in itertools.count():
-                try:
-                    post_list = self._call_api(self._API_ENDPOINT, query, display_id,
-                                               note='Downloading video list page %d%s' % (page, f' (attempt {retries})' if retries != 0 else ''),
-                                               errnote='Unable to download video list')
-                except ExtractorError as e:
-                    if isinstance(e.cause, json.JSONDecodeError) and e.cause.pos == 0 and retries != max_retries:
-                        self.report_warning('%s. Retrying...' % str(e.cause or e.msg))
-                        continue
-                    raise
-                break
+            post_list = self._call_api(self._API_ENDPOINT, query, display_id,
+                                       note=f'Downloading video list page {page}',
+                                       errnote='Unable to download video list')
             for video in post_list.get('aweme_list', []):
                 yield {
                     **self._parse_aweme_video_app(video),

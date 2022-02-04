@@ -688,8 +688,8 @@ class SoundcloudPagedPlaylistBaseIE(SoundcloudBaseIE):
 
         # Downloading page may result in intermittent 502 HTTP error
         # See https://github.com/yt-dlp/yt-dlp/issues/872
-        call_api = self._retry(
-            lambda e: isinstance(e.cause, compat_HTTPError) and e.cause.code == 502)(self._download_json)
+        call_api = self._retry(self._download_json,
+                               lambda e: isinstance(e.cause, compat_HTTPError) and e.cause.code == 502)
 
         for i in itertools.count(1):
             response = call_api(url, playlist_id, query=query, headers=self._HEADERS,
