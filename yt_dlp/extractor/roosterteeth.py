@@ -12,6 +12,7 @@ from ..utils import (
     url_or_none,
     urlencode_postdata,
     urljoin,
+    update_url_query,
 )
 
 
@@ -98,7 +99,7 @@ class RoosterTeethIE(RoosterTeethBaseIE):
             'series': 'Million Dollars, But...',
             'episode': 'Million Dollars, But... The Game Announcement',
         },
-        'skip_download': 'm3u8',
+        'params': {'skip_download': True},
     }, {
         'url': 'https://roosterteeth.com/watch/rwby-bonus-25',
         'info_dict': {
@@ -111,7 +112,7 @@ class RoosterTeethIE(RoosterTeethBaseIE):
             'thumbnail': r're:^https?://.*\.(png|jpe?g)$',
             'ext': 'mp4',
         },
-        'skip_download': 'm3u8',
+        'params': {'skip_download': True},
     }, {
         'url': 'http://achievementhunter.roosterteeth.com/episode/off-topic-the-achievement-hunter-podcast-2016-i-didn-t-think-it-would-pass-31',
         'only_matching': True,
@@ -182,6 +183,13 @@ class RoosterTeethSeriesIE(RoosterTeethBaseIE):
             'id': 'role-initiative',
             'title': 'Role Initiative',
         }
+    }, {
+        'url': 'https://roosterteeth.com/series/let-s-play-minecraft?season=9',
+        'playlist_mincount': 50,
+        'info_dict': {
+            'id': 'let-s-play-minecraft-9',
+            'title': 'Let\'s Play Minecraft - Season 9',
+        }
     }]
 
     def _entries(self, series_id, season_number):
@@ -192,7 +200,7 @@ class RoosterTeethSeriesIE(RoosterTeethBaseIE):
             idx = traverse_obj(data, ('attributes', 'number'))
             if season_number and idx != season_number:
                 continue
-            season_url = urljoin(self._API_BASE, data['links']['episodes'])
+            season_url = update_url_query(urljoin(self._API_BASE, data['links']['episodes']), {'per_page': 1000})
             season = self._download_json(season_url, display_id, f'Downloading season {idx} JSON metadata')['data']
             for episode in season:
                 yield self.url_result(
