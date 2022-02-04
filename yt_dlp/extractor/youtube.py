@@ -743,7 +743,7 @@ class YoutubeBaseInfoExtractor(InfoExtractor):
             self._extract_and_report_alerts(response, only_once=True)
             # Youtube sometimes sends incomplete data
             # See: https://github.com/ytdl-org/youtube-dl/issues/28194
-            if check_get_keys and not traverse_obj(response, *check_get_keys):
+            if check_get_keys and not traverse_obj(response, *variadic(check_get_keys)):
                 raise ExtractorError('Incomplete data received')
             return response
         return wrapper
