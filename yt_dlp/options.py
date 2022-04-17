@@ -2,6 +2,7 @@ import optparse
 import os.path
 import re
 import shlex
+import string
 import sys
 
 from .compat import compat_expanduser, compat_get_terminal_size, compat_getenv
@@ -73,7 +74,7 @@ def parseOpts(overrideArguments=None, ignore_config_files='if_override'):
 
     def add_config(label, path, user=False):
         """ Adds config and returns whether to continue """
-        if root.parse_args()[0].ignoreconfig:
+        if root.parse_known_args()[0].ignoreconfig:
             return False
         # Multiple package names can be given here
         # Eg: ('yt-dlp', 'youtube-dlc', 'youtube-dl') will look for
@@ -92,14 +93,14 @@ def parseOpts(overrideArguments=None, ignore_config_files='if_override'):
     def load_configs():
         yield not ignore_config_files
         yield add_config('Portable', get_executable_path())
-        yield add_config('Home', expand_path(root.parse_args()[0].paths.get('home', '')).strip())
+        yield add_config('Home', expand_path(root.parse_known_args()[0].paths.get('home', '')).strip())
         yield add_config('User', None, user=True)
         yield add_config('System', '/etc')
 
     if all(load_configs()):
         # If ignoreconfig is found inside the system configuration file,
         # the user configuration is removed
-        if root.parse_args()[0].ignoreconfig:
+        if root.parse_known_args()[0].ignoreconfig:
             user_conf = next((i for i, conf in enumerate(root.configs) if conf.label == 'User'), None)
             if user_conf is not None:
                 root.configs.pop(user_conf)
@@ -143,6 +144,19 @@ class _YoutubeDLOptionParser(optparse.OptionParser):
             formatter=_YoutubeDLHelpFormatter(),
             conflict_handler='resolve',
         )
+
+    def parse_known_args(self, args=None, values=None):
+        """ Same as parse_args, but ignore unknown switches. Similar to argparse.parse_known_args """
+        self.rargs, self.largs = self._get_args(args), []
+        self.values = values or self.get_default_values()
+        while self.rargs:
+            try:
+                self._process_args(self.largs, self.rargs, self.values)
+            except (optparse.BadOptionError, optparse.AmbiguousOptionError) as err:
+                self.largs.append(err.opt_str)
+            except optparse.OptionValueError as err:
+                self.error(str(err))
+        return self.check_values(self.values, self.largs)
 
     def _get_args(self, args):
         return sys.argv[1:] if args is None else list(args)
@@ -223,6 +237,32 @@ def create_parser():
         setattr(parser.values, option.dest, out_dict)
 
     parser = _YoutubeDLOptionParser()
+    alias_group = optparse.OptionGroup(parser, 'Aliases')
+    Formatter = string.Formatter()
+
+    def _create_alias(option, opt_str, value, parser):
+        aliases, opts = value
+        try:
+            nargs = len(set(i if f == '' else f
+                            for i, (_, f, _, _) in enumerate(Formatter.parse(opts)) if f is not None))
+            opts.format(*map(str, range(nargs)))  # validate
+        except Exception as err:
+            raise optparse.OptionValueError(f'wrong {opt_str} OPTIONS formatting; {err}')
+        if alias_group not in parser.option_groups:
+            parser.add_option_group(alias_group)
+        try:
+            alias_group.add_option(
+                *map(str.strip, aliases.split(',')), help=opts, nargs=nargs, type='str',
+                metavar=' '.join(f'ARG{i}' for i in range(nargs)), action='callback',
+                callback=_alias_callback, callback_kwargs={'opts': opts, 'nargs': nargs})
+        except Exception as err:
+            raise optparse.OptionValueError(f'wrong {opt_str} formatting; {err}')
+    def _alias_callback(option, opt_str, value, parser, opts, nargs):
+        if nargs == 1:
+            value = [value]
+        assert (nargs == 0 and value is None) or len(value) == nargs
+        parser.rargs[:0] = shlex.split(
+            opts if value is None else opts.format(*map(shlex.quote, value)))
 
     general = optparse.OptionGroup(parser, 'General Options')
     general.add_option(
@@ -344,6 +384,10 @@ def create_parser():
             'Options that can help keep compatibility with youtube-dl or youtube-dlc '
             'configurations by reverting some of the changes made in yt-dlp. '
             'See "Differences in default behavior" for details'))
+    general.add_option(
+        '--alias', metavar='ALIASES OPTIONS', type='str', nargs=2,
+        action='callback', callback=_create_alias,
+        help='TODO')
 
     network = optparse.OptionGroup(parser, 'Network Options')
     network.add_option(

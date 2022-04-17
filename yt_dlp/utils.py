@@ -5159,7 +5159,7 @@ class Config:
 
         self.__initialized = True
         self.own_args, self.filename = args, filename
-        for location in self._parser.parse_args(args)[0].config_locations or []:
+        for location in self._parser.parse_known_args(args)[0].config_locations or []:
             location = os.path.join(directory, expand_path(location))
             if os.path.isdir(location):
                 location = os.path.join(location, 'yt-dlp.conf')
@@ -5220,6 +5220,9 @@ class Config:
         for config in reversed(self.configs):
             yield from config.all_args
         yield from self.own_args or []
+
+    def parse_known_args(self):
+        return self._parser.parse_known_args(self.all_args)
 
     def parse_args(self):
         return self._parser.parse_args(self.all_args)
