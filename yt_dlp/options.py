@@ -1,3 +1,4 @@
+import contextlib
 import optparse
 import os.path
 import re
@@ -20,6 +21,7 @@ from .utils import (
     OUTTMPL_TYPES,
     POSTPROCESS_WHEN,
     Config,
+    Namespace,
     expand_path,
     get_executable_path,
     join_nonempty,
@@ -92,7 +94,7 @@ def parseOpts(overrideArguments=None, ignore_config_files='if_override'):
         yield add_config('User', None, user=True)
         yield add_config('System', '/etc')
 
-    verbose = True
+    opts = optparse.Values({'verbose': True, 'print_help': False})
     try:
         if overrideArguments:
             root.append_config(overrideArguments, label='Override')
@@ -108,12 +110,19 @@ def parseOpts(overrideArguments=None, ignore_config_files='if_override'):
                     root.configs.pop(user_conf)
 
         opts, args = root.parse_args()
-        verbose = opts.verbose
     except optparse.OptParseError:
-        verbose = root.parse_known_args(strict=False)[0].verbose
+        with contextlib.suppress(optparse.OptParseError):
+            opts, _ = root.parse_known_args(strict=False)
+        raise
     finally:
-        if verbose:
+        if opts.verbose:
             write_string(f'\n{root}'.replace('\n| ', '\n[debug] ')[1:] + '\n')
+        if opts.print_help:
+            if opts.verbose:
+                write_string('\n')
+            root.parser.print_help()
+    if opts.print_help:
+        sys.exit()
     return root.parser, opts, args
 
 
@@ -152,7 +161,7 @@ class _YoutubeDLOptionParser(optparse.OptionParser):
         )
 
     _UNKNOWN_OPTION = (optparse.BadOptionError, optparse.AmbiguousOptionError)
-    _BAD_OPTION = _UNKNOWN_OPTION + (optparse.OptionValueError, )
+    _BAD_OPTION = optparse.OptionValueError
 
     def parse_known_args(self, args=None, values=None, strict=True):
         """ Same as parse_args, but ignore unknown switches. Similar to argparse.parse_known_args """
@@ -283,8 +292,7 @@ def create_parser():
 
     general = optparse.OptionGroup(parser, 'General Options')
     general.add_option(
-        '-h', '--help',
-        action='help',
+        '-h', '--help', dest='print_help', action='store_true',
         help='Print this help text and exit')
     general.add_option(
         '--version',
