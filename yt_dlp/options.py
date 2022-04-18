@@ -31,15 +31,9 @@ from .version import __version__
 
 
 def parseOpts(overrideArguments=None, ignore_config_files='if_override'):
-    parser = create_parser()
-    root = Config(parser)
-
+    root = Config(create_parser())
     if ignore_config_files == 'if_override':
         ignore_config_files = overrideArguments is not None
-    if overrideArguments:
-        root.append_config(overrideArguments, label='Override')
-    else:
-        root.append_config(sys.argv[1:], label='Command-line')
 
     def _readUserConf(package_name, default=[]):
         # .config
@@ -98,18 +92,29 @@ def parseOpts(overrideArguments=None, ignore_config_files='if_override'):
         yield add_config('User', None, user=True)
         yield add_config('System', '/etc')
 
-    if all(load_configs()):
-        # If ignoreconfig is found inside the system configuration file,
-        # the user configuration is removed
-        if root.parse_known_args()[0].ignoreconfig:
-            user_conf = next((i for i, conf in enumerate(root.configs) if conf.label == 'User'), None)
-            if user_conf is not None:
-                root.configs.pop(user_conf)
+    verbose = True
+    try:
+        if overrideArguments:
+            root.append_config(overrideArguments, label='Override')
+        else:
+            root.append_config(sys.argv[1:], label='Command-line')
 
-    opts, args = root.parse_args()
-    if opts.verbose:
-        write_string(f'\n{root}'.replace('\n| ', '\n[debug] ')[1:] + '\n')
-    return parser, opts, args
+        if all(load_configs()):
+            # If ignoreconfig is found inside the system configuration file,
+            # the user configuration is removed
+            if root.parse_known_args()[0].ignoreconfig:
+                user_conf = next((i for i, conf in enumerate(root.configs) if conf.label == 'User'), None)
+                if user_conf is not None:
+                    root.configs.pop(user_conf)
+
+        opts, args = root.parse_args()
+        verbose = opts.verbose
+    except optparse.OptParseError:
+        verbose = root.parse_known_args(strict=False)[0].verbose
+    finally:
+        if verbose:
+            write_string(f'\n{root}'.replace('\n| ', '\n[debug] ')[1:] + '\n')
+    return root.parser, opts, args
 
 
 class _YoutubeDLHelpFormatter(optparse.IndentedHelpFormatter):
@@ -146,18 +151,28 @@ class _YoutubeDLOptionParser(optparse.OptionParser):
             conflict_handler='resolve',
         )
 
-    def parse_known_args(self, args=None, values=None):
+    _UNKNOWN_OPTION = (optparse.BadOptionError, optparse.AmbiguousOptionError)
+    _BAD_OPTION = _UNKNOWN_OPTION + (optparse.OptionValueError, )
+
+    def parse_known_args(self, args=None, values=None, strict=True):
         """ Same as parse_args, but ignore unknown switches. Similar to argparse.parse_known_args """
         self.rargs, self.largs = self._get_args(args), []
         self.values = values or self.get_default_values()
         while self.rargs:
             try:
                 self._process_args(self.largs, self.rargs, self.values)
-            except (optparse.BadOptionError, optparse.AmbiguousOptionError) as err:
-                self.largs.append(err.opt_str)
-            except optparse.OptionValueError as err:
-                self.error(str(err))
+            except optparse.OptParseError as err:
+                if isinstance(err, self._UNKNOWN_OPTION):
+                    self.largs.append(err.opt_str)
+                elif strict:
+                    if isinstance(err, self._BAD_OPTION):
+                        self.error(str(err))
+                    raise
         return self.check_values(self.values, self.largs)
+
+    def error(self, msg):
+        msg = f'{self.get_prog_name()}: error: {msg.strip()}\n'
+        raise optparse.OptParseError(f'{self.get_usage()}\n{msg}' if self.usage else msg)
 
     def _get_args(self, args):
         return sys.argv[1:] if args is None else list(args)

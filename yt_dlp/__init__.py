@@ -4,6 +4,7 @@ f'You are using an unsupported version of Python. Only Python versions 3.6 and a
 __license__ = 'Public Domain'
 
 import itertools
+import optparse
 import os
 import random
 import re
@@ -868,6 +869,8 @@ def main(argv=None):
         devnull = os.open(os.devnull, os.O_WRONLY)
         os.dup2(devnull, sys.stdout.fileno())
         _exit(f'\nERROR: {e}')
+    except optparse.OptParseError as e:
+        _exit(2, f'\n{e}')
 
 
 __all__ = [
