@@ -26,6 +26,7 @@ from .utils import (
     remove_end,
     write_string,
 )
+from .update import detect_variant
 from .version import __version__
 
 
@@ -137,7 +138,7 @@ class _YoutubeDLOptionParser(optparse.OptionParser):
 
     def __init__(self):
         super().__init__(
-            prog='yt-dlp',
+            prog='yt-dlp' if detect_variant() == 'source' else None,
             version=__version__,
             usage='%prog [OPTIONS] URL [URL...]',
             epilog='See full documentation at  https://github.com/yt-dlp/yt-dlp#readme',
@@ -257,6 +258,7 @@ def create_parser():
                 callback=_alias_callback, callback_kwargs={'opts': opts, 'nargs': nargs})
         except Exception as err:
             raise optparse.OptionValueError(f'wrong {opt_str} formatting; {err}')
+
     def _alias_callback(option, opt_str, value, parser, opts, nargs):
         if nargs == 1:
             value = [value]
