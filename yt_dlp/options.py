@@ -1,3 +1,4 @@
+import collections
 import contextlib
 import optparse
 import os.path
@@ -149,8 +150,10 @@ class _YoutubeDLHelpFormatter(optparse.IndentedHelpFormatter):
 
 class _YoutubeDLOptionParser(optparse.OptionParser):
     # optparse is deprecated since python 3.2. So assume a stable interface even for private methods
+    ALIAS_TRIGGER_LIMIT = 100
 
     def __init__(self):
+        self._triggered_aliases = collections.defaultdict(int)
         super().__init__(
             prog='yt-dlp' if detect_variant() == 'source' else None,
             version=__version__,
@@ -275,15 +278,20 @@ def create_parser():
             raise optparse.OptionValueError(f'wrong {opt_str} OPTIONS formatting; {err}')
         if alias_group not in parser.option_groups:
             parser.add_option_group(alias_group)
+
+        aliases = (x if x.startswith('-') else f'--{x}' for x in map(str.strip, aliases.split(',')))
         try:
             alias_group.add_option(
-                *map(str.strip, aliases.split(',')), help=opts, nargs=nargs, type='str',
+                *aliases, dest='_', help=opts, nargs=nargs, type='str',
                 metavar=' '.join(f'ARG{i}' for i in range(nargs)), action='callback',
                 callback=_alias_callback, callback_kwargs={'opts': opts, 'nargs': nargs})
         except Exception as err:
             raise optparse.OptionValueError(f'wrong {opt_str} formatting; {err}')
 
     def _alias_callback(option, opt_str, value, parser, opts, nargs):
+        parser._triggered_aliases[opt_str] += 1
+        if parser._triggered_aliases[opt_str] > parser.ALIAS_TRIGGER_LIMIT:
+            raise optparse.OptionValueError(f'Alias {opt_str} exceeded invocation limit')
         if nargs == 1:
             value = [value]
         assert (nargs == 0 and value is None) or len(value) == nargs
