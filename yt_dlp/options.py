@@ -418,9 +418,17 @@ def create_parser():
             'configurations by reverting some of the changes made in yt-dlp. '
             'See "Differences in default behavior" for details'))
     general.add_option(
-        '--alias', metavar='ALIASES OPTIONS', type='str', nargs=2,
+        '--alias', metavar='ALIASES OPTIONS', dest='_', type='str', nargs=2,
         action='callback', callback=_create_alias,
-        help='TODO')
+        help=(
+            'Create aliases for an option string. Unless an alias starts with a dash "-", it is prefixed with "--". '
+            'Arguments are parsed according to the Python string formatting mini-language. '
+            'Eg: --alias get-audio,-X "-S=aext:{0},abr -x --audio-format {0}" creates options '
+            '"--get-audio" and "-X" that takes an argument (ARG0) and expands to '
+            '"-S=aext:ARG0,abr -x --audio-format ARG0". All defined aliases are listed in the --help output. '
+            'Alias options can trigger more aliases; so be carefull to avoid defining recursive options. '
+            f'As a safety measure, each alias may be triggered a maximum of {_YoutubeDLOptionParser.ALIAS_TRIGGER_LIMIT} times. '
+            'This option can be used multiple times'))
 
     network = optparse.OptionGroup(parser, 'Network Options')
     network.add_option(
