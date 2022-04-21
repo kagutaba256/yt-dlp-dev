@@ -22,7 +22,6 @@ from .utils import (
     OUTTMPL_TYPES,
     POSTPROCESS_WHEN,
     Config,
-    Namespace,
     expand_path,
     get_executable_path,
     join_nonempty,
@@ -115,11 +114,15 @@ def parseOpts(overrideArguments=None, ignore_config_files='if_override'):
         with contextlib.suppress(optparse.OptParseError):
             opts, _ = root.parse_known_args(strict=False)
         raise
+    except (SystemExit, KeyboardInterrupt):
+        opts.verbose = False
+        raise
     finally:
-        if opts.verbose:
-            write_string(f'\n{root}'.replace('\n| ', '\n[debug] ')[1:] + '\n')
+        verbose = opts.verbose and f'\n{root}'.replace('\n| ', '\n[debug] ')[1:]
+        if verbose:
+            write_string(f'{verbose}\n')
         if opts.print_help:
-            if opts.verbose:
+            if verbose:
                 write_string('\n')
             root.parser.print_help()
     if opts.print_help:
@@ -153,7 +156,6 @@ class _YoutubeDLOptionParser(optparse.OptionParser):
     ALIAS_TRIGGER_LIMIT = 100
 
     def __init__(self):
-        self._triggered_aliases = collections.defaultdict(int)
         super().__init__(
             prog='yt-dlp' if detect_variant() == 'source' else None,
             version=__version__,
@@ -282,15 +284,17 @@ def create_parser():
         aliases = (x if x.startswith('-') else f'--{x}' for x in map(str.strip, aliases.split(',')))
         try:
             alias_group.add_option(
-                *aliases, dest='_', help=opts, nargs=nargs, type='str',
+                *aliases, help=opts, nargs=nargs, type='str',
+                dest='_triggered_aliases', default=collections.defaultdict(int),
                 metavar=' '.join(f'ARG{i}' for i in range(nargs)), action='callback',
                 callback=_alias_callback, callback_kwargs={'opts': opts, 'nargs': nargs})
         except Exception as err:
             raise optparse.OptionValueError(f'wrong {opt_str} formatting; {err}')
 
     def _alias_callback(option, opt_str, value, parser, opts, nargs):
-        parser._triggered_aliases[opt_str] += 1
-        if parser._triggered_aliases[opt_str] > parser.ALIAS_TRIGGER_LIMIT:
+        counter = getattr(parser.values, option.dest)
+        counter[opt_str] += 1
+        if counter[opt_str] > parser.ALIAS_TRIGGER_LIMIT:
             raise optparse.OptionValueError(f'Alias {opt_str} exceeded invocation limit')
         if nargs == 1:
             value = [value]
